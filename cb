@@ -1,0 +1,221 @@
+#!/usr/bin/env python3
+
+# Cycle Breaker
+# Copyright (C) 2017 Björn Griebenow <b.griebenow@web.de>
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+import os.path
+import re
+import sys
+
+
+def extract_filename_from_c_source(reference_string):
+    try:
+        return re.search('.*["<](.*)[">].*', reference_string).group(1)
+        # found = re.search('AAA(.+?)ZZZ', text).group(1)
+    except AttributeError:
+        raise ValueError("Cannot extract filename")
+
+
+def extract_filename_from_cpp_source(reference_string):
+    return extract_filename_from_c_source()
+
+
+def extract_filename_from_shell_source(reference_string):
+    raise NotImplementedError
+
+
+def extract_filename_from_python_source(reference_string):
+    raise NotImplementedError
+
+
+def extract_filename_from_ruby_source(reference_string):
+    raise NotImplementedError
+
+
+def find_file_in_path_list(path_list, relative_filename):
+    for path in path_list:
+        absolute_filename = os.path.join(path, relative_filename)
+        if os.path.isfile(absolute_filename):
+            return absolute_filename
+    raise ValueError("File does not exist in any path:")
+
+
+# TODO: Detect multiline comments.
+def c_filter_inactive(source_filename, global_options):
+    filtered_file = []
+    with open(source_filename) as source_file:
+        for source_line in source_file:
+            filtered_file.append(re.sub(r"//.*$", "", source_line))
+    return filtered_file
+
+
+def c_system_reference_to_abs_filename(relative_filename):
+    # Todo: Search at runtime with:
+    # echo | gcc -E -Wp,-v - 2>&1 |grep " /usr"
+    fixed_path_list = [
+        '/usr/lib/gcc/x86_64-linux-gnu/6/include'
+        '/usr/local/include'
+        '/usr/lib/gcc/x86_64-linux-gnu/6/include-fixed'
+        '/usr/include/x86_64-linux-gnu'
+        '/usr/include'
+    ]
+    find_file_in_path_list(fixed_path_list, relative_filename)
+
+
+def c_project_root_reference_to_abs_filename(relative_filename):
+    raise NotImplementedError
+
+
+def cpp_system_reference_to_abs_filename(relative_filename):
+    # Todo: Search at runtime with:
+    # echo | cpp -xc++ -Wp,-v - 2>&1 |grep " /usr"
+    fixed_path_list = [
+        '/usr/include/c++/6',
+        '/usr/include/x86_64-linux-gnu/c++/6',
+        '/usr/include/c++/6/backward',
+        '/usr/lib/gcc/x86_64-linux-gnu/6/include',
+        '/usr/local/include',
+        '/usr/lib/gcc/x86_64-linux-gnu/6/include-fixed',
+        '/usr/include/x86_64-linux-gnu',
+        '/usr/include'
+    ]
+    find_file_in_path_list(fixed_path_list, relative_filename)
+
+
+def cpp_project_root_reference_to_abs_filename(relative_filename):
+    # Should be identical to C.
+    c_project_root_reference_to_abs_filename(relative_filename)
+
+
+language_behaviour_mapping = {
+    'c': [{'filter_inactive':    c_filter_inactive,
+           'search':             "#include \"",
+           'filename_extract':   extract_filename_from_c_source,
+           'filename_fs_lookup': c_project_root_reference_to_abs_filename},
+          # {'search':             "#include <",
+          #  'filename_extract':   extract_filename_from_c_source,
+          #  'filename_fs_lookup': c_system_reference_to_abs_filename}
+    ]
+}
+
+#     'cpp':    {'search':           ['#include '],
+#                'filename_extract': extract_filename_from_cpp_source},
+#     'shell':  {'search':           ['source ', '. '],
+#                'filename_extract': extract_filename_from_shell_source},
+#     'python': {'search':           ['import '],
+#                'filename_extract': extract_filename_from_python_source},
+#     'ruby':   {'search':           ['require', 'require_local'],
+#                'filename_extract': extract_filename_from_ruby_source}
+# }
+
+file_extension_language_mapping = {
+    '.c':   'c',
+    '.h':   'c',  # TODO: Can also map to C++
+    '.cpp': 'cpp',
+    '.hpp': 'cpp',
+    '.sh':  'shell',
+    '.py':  'python',
+    '.rb':  'ruby'
+}
+
+
+def detect_programming_language(source_filename):
+    file_extension = os.path.splitext(source_filename)[1]
+    if file_extension not in file_extension_language_mapping:
+        raise ValueError("Unknown file extension: " + file_extension)
+    return file_extension_language_mapping[file_extension]
+
+
+def language_behaviour(language):
+    if language not in language_behaviour_mapping:
+        raise ValueError("Language has no string mapping: " + language)
+    return language_behaviour_mapping[language]
+
+
+def find_referenced_file_in_path_list(path_list, relative_filename):
+    if len(path_list) == 0:
+        raise ValueError("Empty path list given")
+    for path in path_list:
+        absolute_filename = os.path.join(path, relative_filename)
+        if os.path.isfile(absolute_filename):
+            return absolute_filename
+    raise ValueError("Did not find referenced file in any path: " + relative_filename)
+
+
+def module_reference_filename_list(source_filename, global_options):
+    found_lines = []
+    # with open(source_filename) as source_file:
+    filtered_file = c_filter_inactive(source_filename, global_options)
+    for line_no, line in enumerate(filtered_file):
+        for language_behaviour_iter in global_options['language_behaviour']:
+            if language_behaviour_iter['search'] in line:
+                # print('Line:              ', line_no, ':', line)
+                relative_filename = language_behaviour_iter['filename_extract'](line)
+                # print('Relative filename: ', relative_filename)
+                absolute_filename = find_referenced_file_in_path_list(global_options['project_include_path_list'], relative_filename)
+                # print('Absolute filename: ', absolute_filename)
+                found_lines.append(absolute_filename)
+    return found_lines
+
+
+def follow_module_references(source_filename,
+                             global_options,
+                             current_recursion_depth):
+    print(' ' * 2 * current_recursion_depth, 'Current file: ', source_filename)
+    # print('------------------------------------------------------------------------')
+    # print("Current recursion depth:", current_recursion_depth)
+    if current_recursion_depth > global_options['max_recursion_depth']:
+        print("Maximum recursion exceeded: ", global_options['max_recursion_depth'])
+        return 1
+    referenced_filename_list = module_reference_filename_list(source_filename, global_options)
+    # print(referenced_filename_list)
+    for referenced_filename in referenced_filename_list:
+        if follow_module_references(referenced_filename, global_options, current_recursion_depth + 1) == 1:
+            return 1
+    return 0
+
+
+if len(sys.argv) < 2:
+    print("Source filename required as argument")
+    exit(1)
+
+start_source_filename     = sys.argv[1]
+# project_root_path         = os.path.dirname(os.path.abspath(start_source_filename))
+project_include_path_list   = ['.']
+language                  = detect_programming_language(start_source_filename)
+language_behaviour        = language_behaviour(language)
+max_recursion_depth       = 100
+global_options            = {
+    'project_include_path_list': project_include_path_list,
+    'language':                  language,
+    'language_behaviour':        language_behaviour,
+    'max_recursion_depth':       max_recursion_depth
+}
+
+print("Start filename:            ", start_source_filename)
+print("Project include path list: ", project_include_path_list)
+print("Language:                  ", language)
+print("Language behaviour:        ", language_behaviour)
+print("Maximum search depth:      ", max_recursion_depth)
+# print()
+
+print('------------------------------------------------------------------------')
+cycle_found = follow_module_references(start_source_filename,
+                                       global_options,
+                                       0)
+
+print("Cycle found: ", cycle_found)

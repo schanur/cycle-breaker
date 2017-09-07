@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+
 # Cycle Breaker
 # Copyright (C) 2017 Björn Griebenow <b.griebenow@web.de>
 
@@ -17,6 +18,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
+import argparse
 import os.path
 import re
 import sys
@@ -25,7 +27,6 @@ import sys
 def extract_filename_from_c_source(reference_string):
     try:
         return re.search('.*["<](.*)[">].*', reference_string).group(1)
-        # found = re.search('AAA(.+?)ZZZ', text).group(1)
     except AttributeError:
         raise ValueError("Cannot extract filename")
 
@@ -135,8 +136,10 @@ file_extension_language_mapping = {
 
 def detect_programming_language(source_filename):
     file_extension = os.path.splitext(source_filename)[1]
+    if file_extension == "":
+        raise ValueError("File has no file extension: " + source_filename)
     if file_extension not in file_extension_language_mapping:
-        raise ValueError("Unknown file extension: " + file_extension)
+        raise ValueError("File has unknown file extension: " + source_filename)
     return file_extension_language_mapping[file_extension]
 
 
@@ -153,7 +156,8 @@ def find_referenced_file_in_path_list(path_list, relative_filename):
         absolute_filename = os.path.join(path, relative_filename)
         if os.path.isfile(absolute_filename):
             return absolute_filename
-    raise ValueError("Did not find referenced file in any path: " + relative_filename)
+    raise ValueError("Did not find referenced file in any path: "
+                     + relative_filename)
 
 
 def module_reference_filename_list(source_filename, global_options):
@@ -166,7 +170,8 @@ def module_reference_filename_list(source_filename, global_options):
                 # print('Line:              ', line_no, ':', line)
                 relative_filename = language_behaviour_iter['filename_extract'](line)
                 # print('Relative filename: ', relative_filename)
-                absolute_filename = find_referenced_file_in_path_list(global_options['project_include_path_list'], relative_filename)
+                absolute_filename = find_referenced_file_in_path_list(
+                    global_options['project_include_path_list'], relative_filename)
                 # print('Absolute filename: ', absolute_filename)
                 found_lines.append(absolute_filename)
     return found_lines
@@ -174,7 +179,13 @@ def module_reference_filename_list(source_filename, global_options):
 
 def follow_module_references(source_filename,
                              global_options,
+                             stats,
                              current_recursion_depth):
+
+    stats['file_check_cnt'] += 1
+    if current_recursion_depth > stats['max_recursion_depth']:
+        stats['max_recursion_depth'] = current_recursion_depth
+
     print(' ' * 2 * current_recursion_depth, 'Current file: ', source_filename)
     # print('------------------------------------------------------------------------')
     # print("Current recursion depth:", current_recursion_depth)
@@ -184,18 +195,22 @@ def follow_module_references(source_filename,
     referenced_filename_list = module_reference_filename_list(source_filename, global_options)
     # print(referenced_filename_list)
     for referenced_filename in referenced_filename_list:
-        if follow_module_references(referenced_filename, global_options, current_recursion_depth + 1) == 1:
+        if follow_module_references(referenced_filename, global_options, stats, current_recursion_depth + 1) == 1:
             return 1
     return 0
 
 
-if len(sys.argv) < 2:
-    print("Source filename required as argument")
-    exit(1)
+cmd_line_parser = argparse.ArgumentParser()
+cmd_line_parser.add_argument("file", help="Source filename to start the search on")
+cmd_line_parser.add_argument('-i', nargs=1, action='append', default=[["."]], metavar='INCLUDE_PATH', help='Include path')
+args = cmd_line_parser.parse_args()
 
-start_source_filename     = sys.argv[1]
+project_include_path_array_list = args.i
+project_include_path_list = sum(project_include_path_array_list, [])
+start_source_filename = args.file
+
 # project_root_path         = os.path.dirname(os.path.abspath(start_source_filename))
-project_include_path_list   = ['.']
+# project_include_path_list   = ['.']
 language                  = detect_programming_language(start_source_filename)
 language_behaviour        = language_behaviour(language)
 max_recursion_depth       = 100
@@ -206,16 +221,31 @@ global_options            = {
     'max_recursion_depth':       max_recursion_depth
 }
 
+
+stats = {
+    'file_check_cnt':      0,
+    'max_recursion_depth': 0
+}
+
+
 print("Start filename:            ", start_source_filename)
-print("Project include path list: ", project_include_path_list)
 print("Language:                  ", language)
 print("Language behaviour:        ", language_behaviour)
 print("Maximum search depth:      ", max_recursion_depth)
-# print()
+print("Project include path list: ", project_include_path_list)
+print("System include path list:  ", [])
 
 print('------------------------------------------------------------------------')
 cycle_found = follow_module_references(start_source_filename,
                                        global_options,
+                                       stats,
                                        0)
 
 print("Cycle found: ", cycle_found)
+
+print("Stats:")
+print("  Number of checked files:      ", stats['file_check_cnt'])
+print("  Highest occured search depth: ", stats['max_recursion_depth'])
+# ")
+
+#     'max_recursion_depth': 0

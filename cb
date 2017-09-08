@@ -132,10 +132,27 @@ file_extension_language_mapping = {
 }
 
 
+def language_by_content(source_filename):
+    """Detect programming language by file content."""
+    with open(source_filename) as source_file_hdl:
+        source = source_file_hdl.readlines()
+        # print("first line:", source[0], "a")
+        # print(source[0])
+        if '#!/bin/bash' in source[0]:
+            return 'shell'
+        if '#!/bin/sh' in source[0]:
+            return 'shell'
+        if 'python' in source[0]:
+            return 'python'
+        if 'ruby' in source[0]:
+            return 'ruby'
+    raise ValueError("Cannot detect programming language by source file content: " + source_filename)
+
+
 def detect_programming_language(source_filename):
     file_extension = os.path.splitext(source_filename)[1]
     if file_extension == "":
-        raise ValueError("File has no file extension: " + source_filename)
+        return language_by_content(source_filename)
     if file_extension not in file_extension_language_mapping:
         raise ValueError("File has unknown file extension: " + source_filename)
     return file_extension_language_mapping[file_extension]

@@ -35,7 +35,22 @@ def extract_filename_from_cpp_source(reference_string):
 
 
 def extract_filename_from_shell_source(reference_string):
-    raise NotImplementedError
+    filename = ""
+    try:
+        # Search for 'source' directive
+        filename = re.search(r"^ *source +(.*)", reference_string).group(1)
+    except AttributeError:
+        try:
+            print("Try second extraction method")
+            # Search for '.' directive
+            filename = re.search(r"^\ *\.\ *(.+)", reference_string).group(1)
+            # filename = reference_string
+        except AttributeError:
+            raise ValueError("Cannot extract filename from string: ", reference_string)
+
+    filename_without_variables = re.sub(r"\${.*}/", "", filename).replace('"', '')
+    return filename_without_variables
+
 
 
 def extract_filename_from_python_source(reference_string):
@@ -63,6 +78,15 @@ def c_filter_inactive(source_filename, global_options):
     return filtered_file
 
 
+# TODO: Detect multiline comments (lines that end with '\').
+def shell_filter_inactive(source_filename, global_options):
+    filtered_file = []
+    with open(source_filename) as source_file:
+        for source_line in source_file:
+            filtered_file.append(re.sub(r"#.*$", "", source_line))
+    return filtered_file
+
+
 def c_system_reference_to_abs_filename(relative_filename):
     # Todo: Search at runtime with:
     # echo | gcc -E -Wp,-v - 2>&1 |grep " /usr"
@@ -77,6 +101,10 @@ def c_system_reference_to_abs_filename(relative_filename):
 
 
 def c_project_root_reference_to_abs_filename(relative_filename):
+    raise NotImplementedError
+
+
+def shell_project_root_reference_to_abs_filename(relative_filename):
     raise NotImplementedError
 
 
@@ -102,10 +130,14 @@ def cpp_project_root_reference_to_abs_filename(relative_filename):
 
 
 language_behaviour_mapping = {
-    'c': [{'filter_inactive':    c_filter_inactive,
-           'search':             "#include \"",
-           'filename_extract':   extract_filename_from_c_source,
-           'filename_fs_lookup': c_project_root_reference_to_abs_filename}]
+    'c':     [{'filter_inactive':    c_filter_inactive,
+               'search':             [r"^#include\ \""],
+               'filename_extract':   extract_filename_from_c_source,
+               'filename_fs_lookup': c_project_root_reference_to_abs_filename}],
+    'shell': [{'filter_inactive':    c_filter_inactive,
+               'search':             [r"^source ", r"^\.\ "],
+               'filename_extract':   extract_filename_from_shell_source,
+               'filename_fs_lookup': shell_project_root_reference_to_abs_filename}]
 }
 # {'search':             "#include <",
 #  'filename_extract':   extract_filename_from_c_source,
@@ -113,8 +145,6 @@ language_behaviour_mapping = {
 
 #     'cpp':    {'search':           ['#include '],
 #                'filename_extract': extract_filename_from_cpp_source},
-#     'shell':  {'search':           ['source ', '. '],
-#                'filename_extract': extract_filename_from_shell_source},
 #     'python': {'search':           ['import '],
 #                'filename_extract': extract_filename_from_python_source},
 #     'ruby':   {'search':           ['require', 'require_local'],
@@ -178,13 +208,14 @@ def find_referenced_file_in_path_list(path_list, relative_filename):
 def module_reference_filename_list(source_filename, global_options):
     found_lines = []
     filtered_file = c_filter_inactive(source_filename, global_options)
-    for line_no, line in enumerate(filtered_file):
-        for language_behaviour_iter in global_options['language_behaviour']:
-            if language_behaviour_iter['search'] in line:
-                relative_filename = language_behaviour_iter['filename_extract'](line)
-                absolute_filename = find_referenced_file_in_path_list(
-                    global_options['project_include_path_list'], relative_filename)
-                found_lines.append(absolute_filename)
+    for language_behaviour_iter in global_options['language_behaviour']:
+        for search_pattern in language_behaviour_iter['search']:
+            for line_no, line in enumerate(filtered_file):
+                if re.match(search_pattern, line):
+                    relative_filename = language_behaviour_iter['filename_extract'](line)
+                    absolute_filename = find_referenced_file_in_path_list(
+                        global_options['project_include_path_list'], relative_filename)
+                    found_lines.append(absolute_filename)
     return found_lines
 
 

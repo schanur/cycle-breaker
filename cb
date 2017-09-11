@@ -248,6 +248,9 @@ cmd_line_parser.add_argument("file",
                              help="Source filename to start the search on")
 cmd_line_parser.add_argument('-i', nargs=1, action='append', default=[["."]],
                              help='Include path', metavar='INCLUDE_PATH')
+cmd_line_parser.add_argument('-s', default=500,
+                             help='Maximum search depth before giving up. Default is 500, which is already insanely high. Setting this to value',
+                             metavar='SEARCH_DEPTH')
 cmd_line_args = cmd_line_parser.parse_args()
 
 project_include_path_array_list = cmd_line_args.i
@@ -256,12 +259,11 @@ start_source_filename = cmd_line_args.file
 
 language = detect_programming_language(start_source_filename)
 language_behaviour = language_behaviour(language)
-max_recursion_depth = 100
 global_options = {
     'project_include_path_list': project_include_path_list,
     'language':                  language,
     'language_behaviour':        language_behaviour,
-    'max_recursion_depth':       max_recursion_depth
+    'max_recursion_depth':       cmd_line_args.s
 }
 
 

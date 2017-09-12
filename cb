@@ -243,11 +243,14 @@ def follow_module_references(source_filename,
     return 0
 
 
+
+
 cmd_line_parser = argparse.ArgumentParser()
 cmd_line_parser.add_argument("file",
-                             help="Source filename to start the search on")
+                             help="Source filename to start the search on.")
 cmd_line_parser.add_argument('-i', nargs=1, action='append', default=[["."]],
-                             help='Include path', metavar='INCLUDE_PATH')
+                             help='Additional include path to look up relative source filenames. Can be used multiple times to add more than one path.',
+                             metavar='INCLUDE_PATH')
 cmd_line_parser.add_argument('-s', default=500,
                              help='Maximum search depth before giving up. Default is 500, which is already insanely high.',
                              metavar='SEARCH_DEPTH')

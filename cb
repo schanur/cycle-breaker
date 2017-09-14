@@ -19,8 +19,10 @@
 
 
 import argparse
+import json
 import os.path
 import re
+import sys
 
 
 def extract_filename_from_c_source(reference_string):
@@ -44,7 +46,6 @@ def extract_filename_from_shell_source(reference_string):
             print("Try second extraction method")
             # Search for '.' directive
             filename = re.search(r"^\ *\.\ *(.+)", reference_string).group(1)
-            # filename = reference_string
         except AttributeError:
             raise ValueError("Cannot extract filename from string: ", reference_string)
 
@@ -243,7 +244,64 @@ def follow_module_references(source_filename,
     return 0
 
 
+def global_options_for_report(global_options):
+    return {
+        key: global_options[key] for key in [
+            'start_source_filename',
+            'project_include_path_list',
+            'language',
+            'max_recursion_depth',
+            'json_report'
+        ]
+    }
 
+
+def print_json_report(report_data):
+    print(json.dumps(
+        {
+            'result':         report_data['result'],
+            'global_options': global_options_for_report(report_data['global_options']),
+            'stats':          report_data['stats'],
+            'debug':          report_data['debug']
+        },
+        sort_keys=False, indent=4))
+
+
+def print_human_readable_category_header(category_name):
+    print('')
+    print(category_name.upper(), ':', sep='')
+    print('-' * 72)
+
+
+def print_human_readable_report(report_data):
+    print_human_readable_category_header('result')
+    print("Cycle found:                  ", report_data['result']['cycle_found'])
+
+    print_human_readable_category_header('global options')
+    print("Start filename:               ", report_data['global_options']['start_source_filename'])
+    print("Language:                     ", report_data['global_options']['language'])
+    print("Maximum search depth:         ", report_data['global_options']['max_recursion_depth'])
+    print("Project include path list:    ", report_data['global_options']['project_include_path_list'])
+    print("System include path list:     ", [])
+
+    print_human_readable_category_header('statistics')
+    print("Number of checked files:      ", report_data['stats']['file_check_cnt'])
+    print("Highest occured search depth: ", report_data['stats']['max_recursion_depth'])
+
+    print_human_readable_category_header('debug')
+    print("Python recursion limit:       ", report_data['debug']['python_recursion_limit'])
+
+
+def print_report(report_data):
+    if report_data['global_options']['json_report']:
+        print_json_report(report_data)
+    else:
+        print_human_readable_report(report_data)
+
+
+debug = {
+    'python_recursion_limit': sys.getrecursionlimit()
+}
 
 cmd_line_parser = argparse.ArgumentParser()
 cmd_line_parser.add_argument("file",
@@ -251,10 +309,13 @@ cmd_line_parser.add_argument("file",
 cmd_line_parser.add_argument('-i', nargs=1, action='append', default=[["."]],
                              help='Additional include path to look up relative source filenames. Can be used multiple times to add more than one path.',
                              metavar='INCLUDE_PATH')
-cmd_line_parser.add_argument('-s', default=500,
+cmd_line_parser.add_argument('-s', type=int, choices=range(1, debug['python_recursion_limit']), default=500,
                              help='Maximum search depth before giving up. Default is 500, which is already insanely high.',
                              metavar='SEARCH_DEPTH')
+cmd_line_parser.add_argument('-j', action='store_true',
+                             help='Print report as JSON object instead of a human readable format.')
 cmd_line_args = cmd_line_parser.parse_args()
+
 
 project_include_path_array_list = cmd_line_args.i
 project_include_path_list = sum(project_include_path_array_list, [])
@@ -263,10 +324,12 @@ start_source_filename = cmd_line_args.file
 language = detect_programming_language(start_source_filename)
 language_behaviour = language_behaviour(language)
 global_options = {
+    'start_source_filename':     start_source_filename,
     'project_include_path_list': project_include_path_list,
     'language':                  language,
     'language_behaviour':        language_behaviour,
-    'max_recursion_depth':       cmd_line_args.s
+    'max_recursion_depth':       cmd_line_args.s,
+    'json_report':               cmd_line_args.j
 }
 
 
@@ -275,22 +338,17 @@ stats = {
     'max_recursion_depth': 0
 }
 
-
-print("Start filename:            ", start_source_filename)
-print("Language:                  ", language)
-print("Language behaviour:        ", language_behaviour)
-print("Maximum search depth:      ", max_recursion_depth)
-print("Project include path list: ", project_include_path_list)
-print("System include path list:  ", [])
-
-print('-' * 72)
 cycle_found = follow_module_references(start_source_filename,
                                        global_options,
                                        stats,
                                        0)
+result = {
+    'cycle_found':
+    }
 
-print("Cycle found: ", cycle_found)
-
-print("Stats:")
-print("  Number of checked files:      ", stats['file_check_cnt'])
-print("  Highest occured search depth: ", stats['max_recursion_depth'])
+print_report({
+    'result':         result,
+    'global_options': global_options,
+    'stats':          stats,
+    'debug':          debug
+})

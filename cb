@@ -53,7 +53,6 @@ def extract_filename_from_shell_source(reference_string):
     return filename_without_variables
 
 
-
 def extract_filename_from_python_source(reference_string):
     raise NotImplementedError
 
@@ -89,7 +88,7 @@ def shell_filter_inactive(source_filename, global_options):
 
 
 def c_system_reference_to_abs_filename(relative_filename):
-    # Todo: Search at runtime with:
+    # TODO: Search at runtime with:
     # echo | gcc -E -Wp,-v - 2>&1 |grep " /usr"
     fixed_path_list = [
         '/usr/lib/gcc/x86_64-linux-gnu/6/include'
@@ -110,7 +109,7 @@ def shell_project_root_reference_to_abs_filename(relative_filename):
 
 
 def cpp_system_reference_to_abs_filename(relative_filename):
-    # Todo: Search at runtime with:
+    # TODO: Search at runtime with:
     # echo | cpp -xc++ -Wp,-v - 2>&1 |grep " /usr"
     fixed_path_list = [
         '/usr/include/c++/6',
@@ -167,8 +166,6 @@ def language_by_content(source_filename):
     """Detect programming language by file content."""
     with open(source_filename) as source_file_hdl:
         source = source_file_hdl.readlines()
-        # print("first line:", source[0], "a")
-        # print(source[0])
         if '#!/bin/bash' in source[0]:
             return 'shell'
         if '#!/bin/sh' in source[0]:
@@ -221,26 +218,40 @@ def module_reference_filename_list(source_filename, global_options):
 
 
 def follow_module_references(source_filename,
+                             recursion_history,
+                             backtrace_recording,
                              global_options,
                              stats,
                              current_recursion_depth):
+    new_recursion_history = set(recursion_history)
+    new_recursion_history.add(source_filename)
 
     stats['file_check_cnt'] += 1
     if current_recursion_depth > stats['max_recursion_depth']:
         stats['max_recursion_depth'] = current_recursion_depth
 
-    print(' ' * 2 * current_recursion_depth, 'Current file: ', source_filename)
+    if source_filename in recursion_history:
+        print("Cycle found")
+        backtrace_recording.append(source_filename)
+        return 1
+
     if current_recursion_depth > global_options['max_recursion_depth']:
         print("Maximum recursion exceeded: ", global_options['max_recursion_depth'])
-        return 1
+        backtrace_recording.append(source_filename)
+        # TODO: This should not be the same return code as a found cycle.
+        return 2
     referenced_filename_list = module_reference_filename_list(source_filename,
                                                               global_options)
     for referenced_filename in referenced_filename_list:
-        if follow_module_references(referenced_filename,
-                                    global_options,
-                                    stats,
-                                    current_recursion_depth + 1) == 1:
-            return 1
+        recursion_return_code = follow_module_references(referenced_filename,
+                                                         new_recursion_history,
+                                                         backtrace_recording,
+                                                         global_options,
+                                                         stats,
+                                                         current_recursion_depth + 1)
+        if recursion_return_code != 0:
+            backtrace_recording.append(source_filename)
+            return recursion_return_code
     return 0
 
 
@@ -276,6 +287,7 @@ def print_human_readable_category_header(category_name):
 def print_human_readable_report(report_data):
     print_human_readable_category_header('result')
     print("Cycle found:                  ", report_data['result']['cycle_found'])
+    print("Cycle backtrace:              ", report_data['result']['cycle_backtrace'])
 
     print_human_readable_category_header('global options')
     print("Start filename:               ", report_data['global_options']['start_source_filename'])
@@ -338,13 +350,23 @@ stats = {
     'max_recursion_depth': 0
 }
 
+
+recursion_history = set()
+backtrace_recording = []
+
 cycle_found = follow_module_references(start_source_filename,
+                                       recursion_history,
+                                       backtrace_recording,
                                        global_options,
                                        stats,
                                        0)
+
+
 result = {
-    'cycle_found':
-    }
+    'cycle_found':     cycle_found,
+    'cycle_backtrace': backtrace_recording
+}
+
 
 print_report({
     'result':         result,

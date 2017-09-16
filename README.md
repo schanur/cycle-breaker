@@ -4,18 +4,22 @@ Some programming languages make it difficult to find cyclic references between d
 
 ## Supported programming languages
 
-    * C
-    * C++
-    * Shell scripts
+* C
+* C++
+* Shell scripts
 
 Support for Python and Ruby is planned for the next version. Need another language supported? Tell me!
 
 ## Features
 
-    * Switch between JSON and human readable formating
-    * Found cyclic references are printed in a format similar to that of a stack trace
-    * Heuristic programming language detection if source file has no file suffix
+* Switch between JSON and human readable formating
+* Found cyclic references are printed in a format similar to that of a stack trace
+* Heuristic programming language detection if source file has no file suffix
+
+## Limitations
+
+* Only the first cycle gets found, even if more than one cycle exists
 
 ## How does it work
 
-Cyclic referencing in a directed graph is relatively easy to find using a depth search algorithm. When entering a new file recursively, you can either check whether the file has already been searched or simply descend and check whether a global recursive limit has been exceeded. Cycle-Breaker is currently using the second approach.
+Cyclic referencing in a directed graph is easy to detect using a depth search algorithm. When entering a new file recursively, you check if the file has beed visited before. If yes, a cycle is found.

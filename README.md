@@ -1,4 +1,4 @@
-# Cyclc-Breaker
+# Cycle-Breaker
 
 Some programming languages make it difficult to find cyclic references between different source files. Cycle-Breaker finds them.
 

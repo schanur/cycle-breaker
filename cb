@@ -18,6 +18,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
+from enum import Enum
 import argparse
 import json
 import os.path
@@ -25,120 +26,166 @@ import re
 import sys
 
 
-def extract_filename_from_c_source(reference_string):
-    try:
-        return re.search('.*["<](.*)[">].*', reference_string).group(1)
-    except AttributeError:
+def pp(data):
+    print(json.dumps(data, sort_keys=False, indent=4))
+
+
+class LanguageBehavior():
+    def read_file(self, source_filename):
+        source_lines = []
+        with open(source_filename) as source_file:
+            for line_no, source_line in enumerate(source_file):
+                source_lines.append({
+                    'line_no': line_no,
+                    'text':    source_line
+                    })
+        return source_lines
+
+    def string_matches_least_one_in_regex_list(self, string_to_match, regex_list):
+        for search_pattern in regex_list:
+            if re.match(search_pattern, string_to_match):
+                return True
+        return False
+
+    # TODO: Extract filename from reference line
+    def extract_filename_from_source_line_by_regex_search(self, reference_line, regex_list):
+        filename = dict(reference_line)
+        for regex in regex_list:
+            try:
+                filename['target_filename'] = re.search(regex, reference_line['filtered_text']).group(1)
+                return filename
+            except AttributeError:
+                continue
         raise ValueError("Cannot extract filename")
 
+    def relative_filename_to_absolute_filename(self, relative_filename, global_options):
+        return relative_filename
 
-def extract_filename_from_cpp_source(reference_string):
-    return extract_filename_from_c_source()
+    def get_references_from_file(self, source_filename, global_options):
+        """Fill a array with all found references."""
+        source_lines = self.read_file(source_filename)
+        active_source_lines = self.filter_inactive(source_lines)
+        reference_lines = [_ for _ in active_source_lines if self.is_reference_string(_)]
+        relative_reference_filenames = [self.extract_filename_from_source_line(_) for _ in reference_lines]
+        references = [
+            {
+                'relative_filename': _['target_filename'],
+                'absolute_filename': self.relative_filename_to_absolute_filename(_['target_filename'], global_options)
+            } for _ in relative_reference_filenames
+        ]
+        return references
 
 
-def extract_filename_from_shell_source(reference_string):
-    filename = ""
-    try:
-        # Search for 'source' directive
-        filename = re.search(r"^ *source +(.*)", reference_string).group(1)
-    except AttributeError:
+class CLanguageBehavior(LanguageBehavior):
+    def is_reference_string(self, source_line):
+        return self.string_matches_least_one_in_regex_list(source_line['filtered_text'], [r"^#include\ \""])
+
+    # TODO: Detect multiline comments.
+    def filter_inactive(self, source_lines):
+        filtered_source_lines = []
+        for source_line in source_lines:
+            new_entry = dict(source_line)
+            new_entry['filtered_text'] = re.sub(r"//.*$", "", source_line['text'])
+            filtered_source_lines.append(new_entry)
+        return filtered_source_lines
+        # return [dict(_).update(['filtered_source_line'], re.sub(r"//.*$", "", _)) for _ in source_lines]
+
+    # TODO: Extract filename from reference line
+    def extract_filename_from_source_line(self, reference_line):
+        return self.extract_filename_from_source_line_by_regex_search(reference_line, ['.*["<](.*)[">].*'])
+
+    def system_reference_to_abs_filename(self, relative_filename):
+        # TODO: Search at runtime with:
+        # echo | gcc -E -Wp,-v - 2>&1 |grep " /usr"
+        fixed_path_list = [
+            '/usr/lib/gcc/x86_64-linux-gnu/6/include'
+            '/usr/local/include'
+            '/usr/lib/gcc/x86_64-linux-gnu/6/include-fixed'
+            '/usr/include/x86_64-linux-gnu'
+            '/usr/include'
+        ]
+        find_file_in_path_list(fixed_path_list, relative_filename)
+
+    # FIXME Not used.
+    def project_root_reference_to_abs_filename(self, relative_filename):
+        raise NotImplementedError
+
+
+class CppLanguageBehavior(LanguageBehavior):
+    def is_reference_string(self, source_line):
+        raise NotImplementedError
+
+    def extract_filename_from_source_line(self, reference_line):
+        raise NotImplementedError
+
+    def system_reference_to_abs_filename(self, relative_filename):
+        # TODO: Search at runtime with:
+        # echo | cpp -xc++ -Wp,-v - 2>&1 |grep " /usr"
+        fixed_path_list = [
+            '/usr/include/c++/6',
+            '/usr/include/x86_64-linux-gnu/c++/6',
+            '/usr/include/c++/6/backward',
+            '/usr/lib/gcc/x86_64-linux-gnu/6/include',
+            '/usr/local/include',
+            '/usr/lib/gcc/x86_64-linux-gnu/6/include-fixed',
+            '/usr/include/x86_64-linux-gnu',
+            '/usr/include'
+        ]
+        find_file_in_path_list(fixed_path_list, relative_filename)
+
+    # FIXME Not used.
+    def project_root_reference_to_abs_filename(self, relative_filename):
+        # Should be identical to C.
+        raise NotImplementedError
+        # c_project_root_reference_to_abs_filename(relative_filename)
+
+
+class ShellLanguageBehavior(LanguageBehavior):
+    def is_reference_string(self, source_line):
+        is_reference = self.string_matches_least_one_in_regex_list(source_line['filtered_text'],
+                                                                   [r"^source ", r"^\.\ "])
+        return is_reference
+
+    # TODO: Detect multiline comments.
+    def filter_inactive(self, source_lines):
+        filtered_source_lines = []
+        for source_line in source_lines:
+            new_entry = dict(source_line)
+            new_entry['filtered_text'] = re.sub(r"#.*$", "", source_line['text'])
+            filtered_source_lines.append(new_entry)
+        return filtered_source_lines
+
+    def extract_filename_from_source_line(self, reference_line):
+        extract_filename = dict(reference_line)
+        filename = ""
         try:
-            print("Try second extraction method")
-            # Search for '.' directive
-            filename = re.search(r"^\ *\.\ *(.+)", reference_string).group(1)
+            # Search for 'source' directive
+            filename = re.search(r"^ *source +(.*)", reference_line['filtered_text']).group(1)
         except AttributeError:
-            raise ValueError("Cannot extract filename from string: ", reference_string)
+            try:
+                print("Try second extraction method")
+                # Search for '.' directive
+                filename = re.search(r"^\ *\.\ *(.+)", reference_line['filtered_text']).group(1)
+            except AttributeError:
+                raise ValueError("Cannot extract filename from string: ", reference_line['filtered_text'])
 
-    filename_without_variables = re.sub(r"\${.*}/", "", filename).replace('"', '')
-    return filename_without_variables
+        filename_without_variables = re.sub(r"\${.*}/", "", filename).replace('"', '')
+        extract_filename['target_filename'] = filename_without_variables
+        return extract_filename
 
-
-def extract_filename_from_python_source(reference_string):
-    raise NotImplementedError
-
-
-def extract_filename_from_ruby_source(reference_string):
-    raise NotImplementedError
-
-
-def find_file_in_path_list(path_list, relative_filename):
-    for path in path_list:
-        absolute_filename = os.path.join(path, relative_filename)
-        if os.path.isfile(absolute_filename):
-            return absolute_filename
-    raise ValueError("File does not exist in any path:")
+    # FIXME Not used.
+    def project_root_reference_to_abs_filename(self, relative_filename):
+        raise NotImplementedError
 
 
-# TODO: Detect multiline comments.
-def c_filter_inactive(source_filename, global_options):
-    filtered_file = []
-    with open(source_filename) as source_file:
-        for source_line in source_file:
-            filtered_file.append(re.sub(r"//.*$", "", source_line))
-    return filtered_file
+class PythonLanguageBehavior(LanguageBehavior):
+    pass
 
 
-# TODO: Detect multiline comments (lines that end with '\').
-def shell_filter_inactive(source_filename, global_options):
-    filtered_file = []
-    with open(source_filename) as source_file:
-        for source_line in source_file:
-            filtered_file.append(re.sub(r"#.*$", "", source_line))
-    return filtered_file
+class RubyLanguageBehavior(LanguageBehavior):
+    pass
 
 
-def c_system_reference_to_abs_filename(relative_filename):
-    # TODO: Search at runtime with:
-    # echo | gcc -E -Wp,-v - 2>&1 |grep " /usr"
-    fixed_path_list = [
-        '/usr/lib/gcc/x86_64-linux-gnu/6/include'
-        '/usr/local/include'
-        '/usr/lib/gcc/x86_64-linux-gnu/6/include-fixed'
-        '/usr/include/x86_64-linux-gnu'
-        '/usr/include'
-    ]
-    find_file_in_path_list(fixed_path_list, relative_filename)
-
-
-def c_project_root_reference_to_abs_filename(relative_filename):
-    raise NotImplementedError
-
-
-def shell_project_root_reference_to_abs_filename(relative_filename):
-    raise NotImplementedError
-
-
-def cpp_system_reference_to_abs_filename(relative_filename):
-    # TODO: Search at runtime with:
-    # echo | cpp -xc++ -Wp,-v - 2>&1 |grep " /usr"
-    fixed_path_list = [
-        '/usr/include/c++/6',
-        '/usr/include/x86_64-linux-gnu/c++/6',
-        '/usr/include/c++/6/backward',
-        '/usr/lib/gcc/x86_64-linux-gnu/6/include',
-        '/usr/local/include',
-        '/usr/lib/gcc/x86_64-linux-gnu/6/include-fixed',
-        '/usr/include/x86_64-linux-gnu',
-        '/usr/include'
-    ]
-    find_file_in_path_list(fixed_path_list, relative_filename)
-
-
-def cpp_project_root_reference_to_abs_filename(relative_filename):
-    # Should be identical to C.
-    c_project_root_reference_to_abs_filename(relative_filename)
-
-
-language_behaviour_mapping = {
-    'c':     [{'filter_inactive':    c_filter_inactive,
-               'search':             [r"^#include\ \""],
-               'filename_extract':   extract_filename_from_c_source,
-               'filename_fs_lookup': c_project_root_reference_to_abs_filename}],
-    'shell': [{'filter_inactive':    c_filter_inactive,
-               'search':             [r"^source ", r"^\.\ "],
-               'filename_extract':   extract_filename_from_shell_source,
-               'filename_fs_lookup': shell_project_root_reference_to_abs_filename}]
-}
 # {'search':             "#include <",
 #  'filename_extract':   extract_filename_from_c_source,
 #  'filename_fs_lookup': c_system_reference_to_abs_filename}
@@ -150,6 +197,24 @@ language_behaviour_mapping = {
 #     'ruby':   {'search':           ['require', 'require_local'],
 #                'filename_extract': extract_filename_from_ruby_source}
 # }
+
+
+def find_file_in_path_list(path_list, relative_filename):
+    for path in path_list:
+        absolute_filename = os.path.join(path, relative_filename)
+        if os.path.isfile(absolute_filename):
+            return absolute_filename
+    raise ValueError("File does not exist in any path:")
+
+
+language_behaviour_mapping = {
+    'c':      CLanguageBehavior(),
+    'cpp':    CppLanguageBehavior(),
+    'shell':  ShellLanguageBehavior(),
+    'python': PythonLanguageBehavior(),
+    'ruby':   RubyLanguageBehavior()
+}
+
 
 file_extension_language_mapping = {
     '.c':   'c',
@@ -204,17 +269,17 @@ def find_referenced_file_in_path_list(path_list, relative_filename):
 
 
 def module_reference_filename_list(source_filename, global_options):
-    found_lines = []
-    filtered_file = c_filter_inactive(source_filename, global_options)
-    for language_behaviour_iter in global_options['language_behaviour']:
-        for search_pattern in language_behaviour_iter['search']:
-            for line_no, line in enumerate(filtered_file):
-                if re.match(search_pattern, line):
-                    relative_filename = language_behaviour_iter['filename_extract'](line)
-                    absolute_filename = find_referenced_file_in_path_list(
-                        global_options['project_include_path_list'], relative_filename)
-                    found_lines.append(absolute_filename)
-    return found_lines
+    ''' Search each source for a reference '''
+    raise NotImplementedError
+    # found_lines = []
+    # filtered_file = c_filter_inactive(source_filename, global_options)
+    # for line_no, line in enumerate(filtered_file):
+    #     if re.match(search_pattern, line):
+    #         relative_filename = language_behaviour_iter['filename_extract'](line)
+    #         absolute_filename = find_referenced_file_in_path_list(
+    #             global_options['project_include_path_list'], relative_filename)
+    #         found_lines.append(absolute_filename)
+    # return found_lines
 
 
 def follow_module_references(source_filename,
@@ -231,19 +296,18 @@ def follow_module_references(source_filename,
         stats['max_recursion_depth'] = current_recursion_depth
 
     if source_filename in recursion_history:
-        print("Cycle found")
+        # print("Cycle found")
         backtrace_recording.append(source_filename)
         return 1
 
     if current_recursion_depth > global_options['max_recursion_depth']:
-        print("Maximum recursion exceeded: ", global_options['max_recursion_depth'])
+        # print("Maximum recursion exceeded: ", global_options['max_recursion_depth'])
         backtrace_recording.append(source_filename)
-        # TODO: This should not be the same return code as a found cycle.
         return 2
-    referenced_filename_list = module_reference_filename_list(source_filename,
-                                                              global_options)
-    for referenced_filename in referenced_filename_list:
-        recursion_return_code = follow_module_references(referenced_filename,
+    reference_list = global_options['language_behaviour'].get_references_from_file(source_filename,
+                                                                                   global_options)
+    for reference in reference_list:
+        recursion_return_code = follow_module_references(reference['absolute_filename'],
                                                          new_recursion_history,
                                                          backtrace_recording,
                                                          global_options,

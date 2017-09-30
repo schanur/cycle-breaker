@@ -375,66 +375,71 @@ def print_report(report_data):
         print_human_readable_report(report_data)
 
 
-debug = {
-    'python_recursion_limit': sys.getrecursionlimit()
-}
+def run_application(arguments):
+    print(arguments)
 
-cmd_line_parser = argparse.ArgumentParser()
-cmd_line_parser.add_argument("file",
-                             help="Source filename to start the search on.")
-cmd_line_parser.add_argument('-i', nargs=1, action='append', default=[["."]],
-                             help='Additional include path to look up relative source filenames. Can be used multiple times to add more than one path.',
-                             metavar='INCLUDE_PATH')
-cmd_line_parser.add_argument('-s', type=int, choices=range(1, debug['python_recursion_limit']), default=500,
-                             help='Maximum search depth before giving up. Default is 500, which is already insanely high.',
-                             metavar='SEARCH_DEPTH')
-cmd_line_parser.add_argument('-j', action='store_true',
-                             help='Print report as JSON object instead of a human readable format.')
-cmd_line_args = cmd_line_parser.parse_args()
+    debug = {
+        'python_recursion_limit': sys.getrecursionlimit()
+    }
+
+    cmd_line_parser = argparse.ArgumentParser()
+    cmd_line_parser.add_argument("file",
+                                 help="Source filename to start the search on.")
+    cmd_line_parser.add_argument('-i', nargs=1, action='append', default=[["."]],
+                                 help='Additional include path to look up relative source filenames. Can be used multiple times to add more than one path.',
+                                 metavar='INCLUDE_PATH')
+    cmd_line_parser.add_argument('-s', type=int, choices=range(1, debug['python_recursion_limit']), default=500,
+                                 help='Maximum search depth before giving up. Default is 500, which is already insanely high.',
+                                 metavar='SEARCH_DEPTH')
+    cmd_line_parser.add_argument('-j', action='store_true',
+                                 help='Print report as JSON object instead of a human readable format.')
+    cmd_line_args = cmd_line_parser.parse_args(arguments[1:])
+
+    project_include_path_array_list = cmd_line_args.i
+    project_include_path_list = sum(project_include_path_array_list, [])
+    start_source_filename = cmd_line_args.file
+
+    language = detect_programming_language(start_source_filename)
+    behaviour = language_behaviour(language)
+
+    global_options = {
+        'start_source_filename':     start_source_filename,
+        'project_include_path_list': project_include_path_list,
+        'language':                  language,
+        'language_behaviour':        behaviour,
+        'max_recursion_depth':       cmd_line_args.s,
+        'json_report':               cmd_line_args.j
+    }
+
+    print(start_source_filename)
+
+    stats = {
+        'file_check_cnt':      0,
+        'max_recursion_depth': 0
+    }
+
+    recursion_history = set()
+    backtrace_recording = []
+
+    cycle_found = follow_module_references(start_source_filename,
+                                           recursion_history,
+                                           backtrace_recording,
+                                           global_options,
+                                           stats,
+                                           0)
+
+    result = {
+        'cycle_found':     cycle_found,
+        'cycle_backtrace': backtrace_recording
+    }
+
+    print_report({
+        'result':         result,
+        'global_options': global_options,
+        'stats':          stats,
+        'debug':          debug
+    })
 
 
-project_include_path_array_list = cmd_line_args.i
-project_include_path_list = sum(project_include_path_array_list, [])
-start_source_filename = cmd_line_args.file
-
-language = detect_programming_language(start_source_filename)
-language_behaviour = language_behaviour(language)
-global_options = {
-    'start_source_filename':     start_source_filename,
-    'project_include_path_list': project_include_path_list,
-    'language':                  language,
-    'language_behaviour':        language_behaviour,
-    'max_recursion_depth':       cmd_line_args.s,
-    'json_report':               cmd_line_args.j
-}
-
-
-stats = {
-    'file_check_cnt':      0,
-    'max_recursion_depth': 0
-}
-
-
-recursion_history = set()
-backtrace_recording = []
-
-cycle_found = follow_module_references(start_source_filename,
-                                       recursion_history,
-                                       backtrace_recording,
-                                       global_options,
-                                       stats,
-                                       0)
-
-
-result = {
-    'cycle_found':     cycle_found,
-    'cycle_backtrace': backtrace_recording
-}
-
-
-print_report({
-    'result':         result,
-    'global_options': global_options,
-    'stats':          stats,
-    'debug':          debug
-})
+if __name__ == "__main__":
+    run_application(sys.argv)

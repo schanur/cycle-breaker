@@ -2,7 +2,7 @@
 
 
 # Cycle Breaker
-# Copyright (C) 2017 Björn Griebenow <b.griebenow@web.de>
+# Copyright (C) 2017 Bjoern Griebenow <b.griebenow@web.de>
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -376,13 +376,11 @@ def print_report(report_data):
 
 
 def run_application(arguments):
-    print(arguments)
-
     debug = {
         'python_recursion_limit': sys.getrecursionlimit()
     }
 
-    cmd_line_parser = argparse.ArgumentParser()
+    cmd_line_parser = argparse.ArgumentParser(prog='cycle-parser')
     cmd_line_parser.add_argument("file",
                                  help="Source filename to start the search on.")
     cmd_line_parser.add_argument('-i', nargs=1, action='append', default=[["."]],
@@ -411,8 +409,6 @@ def run_application(arguments):
         'json_report':               cmd_line_args.j
     }
 
-    print(start_source_filename)
-
     stats = {
         'file_check_cnt':      0,
         'max_recursion_depth': 0
@@ -439,7 +435,3 @@ def run_application(arguments):
         'stats':          stats,
         'debug':          debug
     })
-
-
-if __name__ == "__main__":
-    run_application(sys.argv)

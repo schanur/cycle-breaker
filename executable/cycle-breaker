@@ -1,0 +1,6 @@
+#!/bin/bash
+
+
+BINPATH=`dirname $0`
+# cd "$BINPATH/../cycle-breaker" && python3 __main__.py $@
+python3 "$BINPATH/../cycle-breaker/__main__.py" $@

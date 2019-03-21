@@ -22,4 +22,4 @@ Support for Python and Ruby is planned for the next version. Need another langua
 
 ## How does it work
 
-Cyclic referencing in a directed graph is easy to detect using a depth search algorithm. When entering a new file recursively, you check if the file has beed visited before. If yes, a cycle is found.
+Cyclic referencing in a directed graph is easy to detect using a depth search algorithm. When entering a new file recursively, you check if the file has been visited before. If yes, a cycle is found.
